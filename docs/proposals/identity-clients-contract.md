@@ -152,20 +152,11 @@ of the client, and the credentials Secret no longer exists.
 Forcing is the `abandon-client` action of the implementation; the control plane never sets it
 without the confirmation above.
 
-**Known gap (KuboCD).** A module removed from a package leaves its HelmRelease in the cluster:
-nothing of it is deleted, so its `OIDCClient` objects, and their clients, stay. Until the engine
-removes the components a new version drops (P6.6 applied to upgrades):
-- **I4a (package)** — a package never removes its clients component in an upgrade. To drop every
-  client, the component stays and declares none.
-- **I4b (okdp-contract)** — okdp-contract compares the new version with the previous one: a
-  component removed while it declared `OIDCClient` objects in the previous version fails, naming
-  the component, and points to I4a.
-- **I4c (okdp-contract, failure of the comparison)** — the check fails closed. The previous
-  version is the highest published version lower than the new one. If it cannot be read (registry
-  unreachable, artifact missing or unreadable, descriptor invalid), the check fails and says why;
-  an unreadable previous version is never taken as "no previous version". Only the first published
-  version of a package has nothing to compare, which the check reports. There is no switch to skip
-  the comparison.
+**Engine (KuboCD).** The engine uninstalls the components a new version drops (P6.6 applied to
+upgrades), dependents first, and the instance is not ready until they are gone. KuboCD does it from
+the build `v0.3.3-okdp.3` of `alex-mabrouk/kubocd` (change pending upstream). An older KuboCD
+leaves the HelmRelease of a dropped component in the cluster, with its `OIDCClient` objects and
+their clients: a platform with identity clients runs that build or a later one.
 
 *Tests:*
 - *uninstall → no client left in the provider, no Secret left;*
@@ -176,10 +167,8 @@ removes the components a new version drops (P6.6 applied to upgrades):
   its `client_id`, the service of the kept client keeps working;*
 - *upgrade to a version whose clients component declares no client → every client gone;*
 - *engine conformance: upgrade to a version without one of the components → no resource of that
-  component remains (HelmRelease included, for KuboCD); until KuboCD passes it, okdp-contract
-  rejects such a version of a package with clients (I4b);*
-- *okdp-contract with the previous version unreachable, missing or invalid → fails, naming the
-  version and the cause; first version → passes and says it compared nothing.*
+  component remains (HelmRelease included, for KuboCD), and the instance is not ready while one
+  does.*
 
 **I5 — Credentials** (MUST, package). The Secret holds `client_id`, and `client_secret` for a
 confidential client. The service reads those two keys, by reference, never by copy into its
@@ -235,12 +224,14 @@ refused, components that depend on the capability report it as not ready. Bypass
 protection is an explicit action of a platform administrator. An upgrade keeps the registrations
 and resumes the pending deletions. When the capability is stopped, deletions wait and nothing is
 lost; the recovery procedure is published with the implementation.
-**Known gap (KuboCD).** Deleting a KuboCD Release removes the Release object at once, without
-waiting for its HelmReleases. With an `OIDCClient` left, the HelmRelease of the operator stays,
-refused and retried, and the operator keeps running, but the Release, which is what the control
-plane shows, is gone: the capability looks uninstalled while it still runs. Until the engine keeps
-the Release until its components are gone, the control plane refuses the deletion itself (P5.8), and
-the package of the capability is installed with `protected: true`, which KuboCD refuses to delete.
+
+**Engine (KuboCD).** The instance stays until its components are uninstalled, so the control plane
+never shows the capability as gone while it runs. From the build `v0.3.3-okdp.3` of
+`alex-mabrouk/kubocd` (change pending upstream), a deleted Release stays in phase `DELETING`: its
+HelmReleases are deleted dependents first, and the message names the one refused, with the reason
+given by Flux. The annotation `kubocd.kubotal.io/skip-deletion-wait: "true"` on a Release lets it go
+without waiting; setting it is the explicit bypass of a platform administrator. An older KuboCD
+removes the Release at once while the operator keeps running.
 
 *Test: uninstall of the capability, through the control plane and directly through Helm, with one
 `OIDCClient` left → refused, the capability keeps running, the `OIDCClient` is listed; last
@@ -267,11 +258,10 @@ counts as a deletion, and never triggers a new registration.
 
 For the 10 modules `oidc-dcr` of today:
 
-- each package gets one clients component with its grant, under the module name `oidc-dcr`, so that
-  under I4a the HelmRelease is upgraded, not left behind;
-- polaris and superset drop their second module (`oidc-dcr-console`, `oidc-dcr-trino`). Its
-  HelmRelease is left behind by KuboCD. It holds no resource, only hooks, so I4b does not apply,
-  but the migration notes remove it;
+- each package gets one clients component with its grant;
+- polaris and superset drop their second module (`oidc-dcr-console`, `oidc-dcr-trino`). KuboCD
+  uninstalls its HelmRelease, which holds no resource, only hooks: like the other `oidc-dcr`
+  modules, its client is handled by the migration notes;
 - the clients registered by `oidc-dcr` stay in the provider, and their Secrets stay too, whatever
   happens to the HelmRelease: the migration notes unregister them with their registration token
   (RFC 7592), delete their Secrets, then delete the hook objects with fixed names (`job/dcr`,
@@ -284,7 +274,7 @@ For the 10 modules `oidc-dcr` of today:
 - new package: the operator, providing `okdp.io/identity-client-registration`, in two components
   (4.2);
 - open-webui and rustfs keep `existing` by default (to be decided separately);
-- okdp-contract: checks of I3, I4b, I4c and I8.
+- okdp-contract: checks of I3 and I8.
 
 ## 7. Out of scope
 
@@ -306,12 +296,15 @@ Done on 2026-10-22, against Keycloak 26.1.3 and Flux 2 (helm-controller 1.6.5):
 | Upgrade removing one client (I4) | removed client gone from Keycloak with its Secret; the other keeps its `client_id` |
 | Delegation revoked (I8) | `SecretAccessDenied`, Secret not restored, registration kept; uninstall then removed the client |
 | Uninstall of the operator with a client left (I9) | uninstall refused, HelmRelease and operator kept, Flux retried; completed on its own after the client was deleted |
-| Same, installed as a KuboCD Release | protected Release: deletion denied by KuboCD; unprotected: the Release disappears at once, the operator HelmRelease stays refused until the last client is gone, then completes; a new Release takes back the kept CRDs and `OIDCProvider` |
+| Same, installed as a KuboCD Release (KuboCD 0.3.2) | protected Release: deletion denied by KuboCD; unprotected: the Release disappears at once, the operator HelmRelease stays refused until the last client is gone, then completes; a new Release takes back the kept CRDs and `OIDCProvider` |
+| Same, KuboCD `v0.3.3-okdp.3` (I9) | the Release stays `DELETING`, its message names the operator HelmRelease and the failed uninstall check; providers uninstalled before the operator; last client deleted → Release, HelmReleases and operator gone within seconds, client gone from Keycloak |
+| Component dropped by a new package version, KuboCD `v0.3.3-okdp.3` (I4) | test package with two components, the second dropped: its HelmRelease and objects uninstalled, the Release not ready until then |
 | Project deletion (namespace deleted directly) | the client is removed from Keycloak, nothing is left |
 | Left-behind `oidc-dcr` HelmRelease (migration) | deleting it leaves the client, its Secret and the hook objects; the migration procedure removed them all |
 
 Still to verify with the packages: I3 with the engine (service waiting for its clients), I6 with
-the services, the project deletion through the control plane, and the KuboCD conformance test of I4.
+the services, the project deletion through the control plane, and I4 with a package whose dropped
+component holds clients.
 
 ## 9. Open questions
 
