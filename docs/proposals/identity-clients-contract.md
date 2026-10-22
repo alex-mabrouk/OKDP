@@ -235,6 +235,13 @@ refused, components that depend on the capability report it as not ready. Bypass
 protection is an explicit action of a platform administrator. An upgrade keeps the registrations
 and resumes the pending deletions. When the capability is stopped, deletions wait and nothing is
 lost; the recovery procedure is published with the implementation.
+**Known gap (KuboCD).** Deleting a KuboCD Release removes the Release object at once, without
+waiting for its HelmReleases. With an `OIDCClient` left, the HelmRelease of the operator stays,
+refused and retried, and the operator keeps running, but the Release, which is what the control
+plane shows, is gone: the capability looks uninstalled while it still runs. Until the engine keeps
+the Release until its components are gone, the control plane refuses the deletion itself (P5.8), and
+the package of the capability is installed with `protected: true`, which KuboCD refuses to delete.
+
 *Test: uninstall of the capability, through the control plane and directly through Helm, with one
 `OIDCClient` left → refused, the capability keeps running, the `OIDCClient` is listed; last
 `OIDCClient` deleted → the uninstall completes without intervention; capability stopped during a
@@ -299,10 +306,12 @@ Done on 2026-10-22, against Keycloak 26.1.3 and Flux 2 (helm-controller 1.6.5):
 | Upgrade removing one client (I4) | removed client gone from Keycloak with its Secret; the other keeps its `client_id` |
 | Delegation revoked (I8) | `SecretAccessDenied`, Secret not restored, registration kept; uninstall then removed the client |
 | Uninstall of the operator with a client left (I9) | uninstall refused, HelmRelease and operator kept, Flux retried; completed on its own after the client was deleted |
+| Same, installed as a KuboCD Release | protected Release: deletion denied by KuboCD; unprotected: the Release disappears at once, the operator HelmRelease stays refused until the last client is gone, then completes; a new Release takes back the kept CRDs and `OIDCProvider` |
+| Project deletion (namespace deleted directly) | the client is removed from Keycloak, nothing is left |
 | Left-behind `oidc-dcr` HelmRelease (migration) | deleting it leaves the client, its Secret and the hook objects; the migration procedure removed them all |
 
 Still to verify with the packages: I3 with the engine (service waiting for its clients), I6 with
-the services, the project deletion from the control plane, and the KuboCD conformance test of I4.
+the services, the project deletion through the control plane, and the KuboCD conformance test of I4.
 
 ## 9. Open questions
 
