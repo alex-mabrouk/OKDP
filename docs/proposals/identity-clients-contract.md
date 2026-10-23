@@ -273,7 +273,7 @@ For the 10 modules `oidc-dcr` of today:
   `oidc.dcr.grantee` come with their defaults;
 - new package: the operator, providing `okdp.io/identity-client-registration`, in two components
   (4.2);
-- open-webui and rustfs keep `existing` by default (to be decided separately);
+- open-webui and rustfs move to `dcr` by default, like the other packages;
 - okdp-contract: checks of I3 and I8.
 
 ## 7. Out of scope
@@ -286,7 +286,7 @@ For the 10 modules `oidc-dcr` of today:
 
 ## 8. Verification
 
-Done on 2026-10-22, against Keycloak 26.1.3 and Flux 2 (helm-controller 1.6.5):
+Done on 2026-10-22 and 2026-10-23, against Keycloak 26.1.3 and Flux 2 (helm-controller 1.6.5):
 
 | Check | Result |
 |---|---|
@@ -301,10 +301,15 @@ Done on 2026-10-22, against Keycloak 26.1.3 and Flux 2 (helm-controller 1.6.5):
 | Component dropped by a new package version, KuboCD `v0.3.3-okdp.3` (I4) | test package with two components, the second dropped: its HelmRelease and objects uninstalled, the Release not ready until then |
 | Project deletion (namespace deleted directly) | the client is removed from Keycloak, nothing is left |
 | Left-behind `oidc-dcr` HelmRelease (migration) | deleting it leaves the client, its Secret and the hook objects; the migration procedure removed them all |
+| Migration of the 10 modules (8 packages) on a running platform | each Release upgraded in place: the `oidc-dcr` component switches chart, the dropped `oidc-dcr-console` and `oidc-dcr-trino` HelmReleases are uninstalled, the old clients unregistered by the migration notes; sign-in and `access` roles unchanged for every service |
+| Service waiting for its clients (I3), with the engine | the service component depends on the clients component; its pods start after the `OIDCClient` objects are ready |
+| Three instances installed at the same time in one namespace (I3) | every Secret written, every pod ready |
+| Upgrade removing one client and the component reading it (I4) | client gone from Keycloak with its Secret and its grant entry, the other client keeps its `client_id`, the service keeps answering |
+| Uninstall, then deletion of the namespace (I4) | clients gone from Keycloak in both cases, no Secret left |
+| Groups and access (I6) | tokens of registered clients carry `groups`; the `access` roles of each service are applied |
 
-Still to verify with the packages: I3 with the engine (service waiting for its clients), I6 with
-the services, the project deletion through the control plane, and I4 with a package whose dropped
-component holds clients.
+Still to verify: the project deletion through the control plane, and the restart of a service after
+an explicit re-registration (I5).
 
 ## 9. Open questions
 
