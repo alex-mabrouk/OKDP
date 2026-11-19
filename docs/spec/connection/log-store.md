@@ -4,43 +4,58 @@ This document defines version `1` of the `logs` contract. It follows the rules o
 
 ## 1. Purpose
 
-Services and the platform write logs to a log store, and some platform components read them back. This contract defines what the `connection` gives and what the store guarantees.
+The platform sends the logs of its cluster to log stores outside OKDP: a central log store, a SIEM, an archive. This contract defines what a `connection` gives, what every entry carries, and what a store and a collector guarantee.
 
-A log store here receives logs with OTLP over HTTP, the protocol of OpenTelemetry, and answers queries with its own query API. The store is everything behind the `endpoint`: a guarantee of this contract can be kept by the engine itself or by a component in front of it. Metrics and traces are out of scope.
+A log store here receives logs with OTLP over HTTP, the protocol of OpenTelemetry. The store is everything behind the `endpoint`: a guarantee of this contract can be kept by the engine itself or by a component in front of it. OKDP does not install, choose or read a store. Metrics and traces are out of scope.
 
-There is one store per cluster, used by every namespace. A store serves no other cluster. Projects are kept apart by the namespace of each entry, not by identities. The contract therefore holds no requirement for a `claim` and has no `provisioner`: a service uses the `connection` directly. The `connection` is published by the package of the store, or written by hand for an existing store. 
+A collector is a platform component that reads logs in the cluster and sends them to the stores. A cluster can have several collectors.
+
+A `connection` is written by hand for an existing store. The contract holds no requirement for a `claim` and has no `provisioner`. Each `connection` is a destination. A cluster can have several, and a store can serve several clusters.
 
 **The connections live in a platform namespace. No project gets one.**
 
 ## 2. Connection
 
-A `connection` gives one identity, for writing or for reading.
-
 | Property | Meaning |
 |---|---|
-| `access` | `write`: the identity sends logs. `read`: the identity runs queries |
-| `endpoint` | For `write`, base URL of the OTLP/HTTP receiver: logs are sent to `<endpoint>/v1/logs`. For `read`, base URL of the query API |
-| `api` | Only for `read`. Name of the query API, in lowercase, for example `logql` or `logsql` |
+| `endpoint` | Base URL of the OTLP/HTTP receiver, in `https`. Logs are sent to `<endpoint>/v1/logs` |
 | `secretRef` | Secret holding `headers`: the HTTP headers sent with every request, in the format of `OTEL_EXPORTER_OTLP_HEADERS`, for example `Authorization=Bearer <token>` |
-
-- A `write` identity cannot read, and a `read` identity cannot write.
-- A `read` identity reads every namespace.
+| `caRef` | Optional. Secret holding `ca.crt`, the CA that signed the certificate of the store. Unset: the CA bundle of the collector |
+| `types` | Optional. Values of `okdp.log.type` (section 3.2) the destination receives, for example `[audit]` for a SIEM. Unset: all of them |
 
 ## 3. Rules
 
-### 3.1 Writing
+### 3.1 Store
 
 - The store accepts OTLP/HTTP logs in binary Protobuf encoding.
-- It keeps the body and the attributes of each entry, and a query can filter on any of them.
+- It keeps the body and the attributes of each entry.
+- The identity of a `connection` can only write. It cannot read, change or remove entries.
 
-### 3.2 Namespace
+### 3.2 Attributes
 
-- Every entry carries the resource attribute `k8s.namespace.name`.
-- The collector sets it from where the entry comes from: the namespace of the pod, or, for an entry about a Kubernetes object, the namespace of that object. A workload never chooses the namespace of its entries: a value it writes is replaced.
-- An entry that belongs to no namespace carries `_platform`. No namespace can have this name.
+Every entry carries these resource attributes:
 
-### 3.3 Reading
+| Attribute | Value |
+|---|---|
+| `k8s.cluster.uid` | UID of the `kube-system` namespace of the cluster |
+| `k8s.namespace.name` | Namespace of the entry |
+| `okdp.log.type` | `audit`, `application` or `infrastructure` |
 
-- A reader can limit a query to one namespace or to `_platform`. The store applies the limit itself, to the whole query, subqueries included. A query cannot remove or widen it.
-- How a reader passes the limit is part of the `api`.
-- No user gets a `read` identity. A user reads through a platform component, which checks the rights of that user before it sets the limit. The store holds no rights of its own.
+- The collector sets them. A workload never chooses them: a value it writes is replaced.
+- The namespace of an entry is the namespace of the pod it comes from, or, for an entry about a Kubernetes object, the namespace of that object. An entry that belongs to no namespace carries `_platform`. No namespace can have this name.
+- `okdp.log.type` is:
+  - `audit` for an audit event of the platform: a request to the Kubernetes API, or an access decision of a data engine;
+  - otherwise `application` for a namespace of a project, that is a namespace with the label `okdp.io/project`;
+  - otherwise `infrastructure`, `_platform` included.
+- A store that serves several clusters tells their entries apart with `k8s.cluster.uid`: two clusters can have a namespace with the same name.
+
+### 3.3 Delivery
+
+- A collector sends each entry at least once to each destination whose `types` hold the `okdp.log.type` of the entry. A store can receive the same entry twice.
+- A collector keeps on disk, for each destination, the entries the store has not accepted yet. A destination that fails never stops the others.
+- An entry is lost when the queue of its destination is full or when the store refuses it for good. The collector counts the lost entries of each destination in a metric. A loss is never silent.
+
+### 3.4 Reading
+
+- No component of OKDP reads a store.
+- Keeping projects and clusters apart when people read is the job of the store and of the tools of its owner. They do it with the attributes of section 3.2.
