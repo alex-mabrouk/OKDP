@@ -42,7 +42,7 @@ Every entry carries these resource attributes:
 | `okdp.log.type` | `audit`, `application` or `infrastructure` |
 
 - The collector sets them. A workload never chooses them: a value it writes is replaced.
-- The namespace of an entry is the namespace of the pod it comes from, or, for an entry about a Kubernetes object, the namespace of that object. An entry that belongs to no namespace carries `_platform`. No namespace can have this name.
+- The namespace of an entry is the namespace of the pod it comes from. An entry about an object, a Kubernetes object or data, carries the namespace that owns the object, for example the namespace of a catalog for an access decision on one of its tables. An entry that belongs to no namespace carries `_platform`. No namespace can have this name.
 - `okdp.log.type` is:
   - `audit` for an audit event of the platform: a request to the Kubernetes API, or an access decision of a data engine;
   - otherwise `application` for a namespace of a project, that is a namespace with the label `okdp.io/project`;
