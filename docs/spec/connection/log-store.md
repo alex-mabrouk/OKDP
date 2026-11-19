@@ -6,7 +6,7 @@ This document defines version `1` of the `logs` contract. It follows the rules o
 
 The platform sends the logs of its cluster to log stores outside OKDP: a central log store, a SIEM, an archive. This contract defines what a `connection` gives, what every entry carries, and what a store and a collector guarantee.
 
-A log store here receives logs with OTLP over HTTP, the protocol of OpenTelemetry. The store is everything behind the `endpoint`: a guarantee of this contract can be kept by the engine itself or by a component in front of it. OKDP does not install, choose or read a store. Metrics and traces are out of scope.
+A log store here receives logs with OTLP over HTTP, the protocol of OpenTelemetry. The store is everything behind the `endpoint`: a guarantee of this contract can be kept by the engine itself or by a component in front of it. OKDP does not install, choose or read a store. Metrics have their own [contract](./metrics-store.md). Traces are out of scope.
 
 A collector is a platform component that reads logs in the cluster and sends them to the stores. A cluster can have several collectors.
 
@@ -27,7 +27,7 @@ A `connection` is written by hand for an existing store. The contract holds no r
 
 ### 3.1 Store
 
-- The store accepts OTLP/HTTP logs in binary Protobuf encoding.
+- The store accepts OTLP/HTTP logs in binary Protobuf encoding, compressed with gzip (`Content-Encoding: gzip`) or not.
 - It keeps the body and the attributes of each entry.
 - The identity of a `connection` can only write. It cannot read, change or remove entries.
 
